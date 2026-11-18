@@ -1,0 +1,10 @@
+min_maki_version = "0.7.0"
+
+[permissions]
+# tool.bash.input charges what bash charges, and the daemon and setup run
+# processes; a package's grants are read strictly.
+run = true
+# state dir, bundle and command lookup.
+fs_read = true
+# bridge.py, state.json and the setup directory.
+fs_write = true
