@@ -25,7 +25,7 @@ restart maki and accept the install prompt:
 
 ```lua
 maki.pack.add({
-  { src = "https://github.com/amirs-maki-plugins/maki-lancet-guard", version = "v1.2.0" },
+  { src = "https://github.com/amirs-maki-plugins/maki-lancet-guard", version = "v1.3.0" },
 })
 ```
 
@@ -89,12 +89,18 @@ synthesized command from a file path is a shape it never saw, scored
 against a threshold calibrated for real ones. The path is already
 structured, so lookups decide it.
 
-A write asks when its target sits outside the working directory (except
-`/tmp`), is or holds a credential (`.env`, `~/.ssh`, `*.pem`, ...),
-changes what later sessions do (`AGENTS.md`, `CLAUDE.md`, the project's
-`.maki/` config), or touches maki's own configuration or this guard's
-state. Public keys, certificates, `known_hosts`, `~/.ssh/config` and
-`.env.example` do not count as credentials. Everything else, including
+A write asks when its target is a credential (`.env`, `~/.ssh`, `*.pem`,
+...), changes what later sessions do (`AGENTS.md`, `CLAUDE.md`, the
+project's `.maki/` config), touches maki's own configuration or this
+guard's state, or lives in a directory that matters beyond the project:
+system trees, and home configuration such as `~/.bashrc`, `~/Library`
+and `~/.config`. Public keys, certificates, `known_hosts`,
+`~/.ssh/config` and `.env.example` do not count as credentials.
+
+Any other out-of-tree write asks once. When the write actually runs,
+the path is owned for its session and later writes and edits to it are
+free: a denied write never runs, so it never owns anything. Files
+created by bash commands are not tracked. Everything else, including
 any file inside the project, passes through to maki's own permission
 flow.
 

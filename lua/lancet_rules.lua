@@ -28,6 +28,7 @@ M.R = {
   maki_own = "the command touches maki's own configuration or this guard's state",
   beyond = "the command reaches beyond this project",
   context = "the file changes what later sessions do",
+  important = "the file lives in a system or configuration directory",
 }
 
 -- rm -rf of these (the directory itself, or anything below them) is a hard
@@ -271,6 +272,36 @@ local function maki_own_target(p, ctx)
   local np = normalize_path(p, ctx.home)
   return (ctx.state_base and under_dir(np, ctx.state_base))
     or (ctx.config_dir and under_dir(np, ctx.config_dir)) or false
+end
+
+-- Directories whose files matter beyond one project: system trees, and
+-- configuration under the home directory. Writes there always ask.
+local IMPORTANT_SYSTEM_DIRS = {
+  "/etc", "/usr", "/bin", "/sbin", "/var", "/boot", "/System", "/Library",
+  "/Applications", "/private/etc", "/private/var",
+}
+local IMPORTANT_HOME_AREAS = { "Library", ".config" }
+
+local function important_target(p, ctx)
+  local np = normalize_path(p, ctx.home)
+  for _, dir in ipairs(IMPORTANT_SYSTEM_DIRS) do
+    if under_dir(np, dir) then
+      return true
+    end
+  end
+  if under_dir(np, ctx.home) then
+    local parent = np:match("^(.*)/[^/]+$")
+    local name = basename(np) or ""
+    if parent == ctx.home and (name:sub(1, 1) == "." or IMPORTANT_HOME_AREAS[name]) then
+      return true
+    end
+    for _, area in ipairs(IMPORTANT_HOME_AREAS) do
+      if under_dir(np, ctx.home .. "/" .. area) then
+        return true
+      end
+    end
+  end
+  return false
 end
 
 -- A credential path appears as an argument. For cp, mv, install and rsync
@@ -566,10 +597,18 @@ function M.verdict(cmd, ctx)
   return worst or { verdict = M.ALLOW }
 end
 
--- write_verdict(path, ctx) -> { verdict = "allow"|"ask", reason = string? }
+-- owned_key(path, ctx): the set key for a path, home-normalized so ~/x
+-- and the spelled-out form are one file.
+function M.owned_key(p, ctx)
+  return normalize_path(p, ctx.home)
+end
+
+-- write_verdict(path, ctx, owned?) -> { verdict = "allow"|"ask", reason = string? }
 -- The target of a write or edit. Rules only: LANCET reads command lines,
--- not file paths.
-function M.write_verdict(p, ctx)
+-- not file paths. `owned` is the caller's set of paths already written
+-- this session: a first out-of-tree write asks, and later writes to a file
+-- that actually ran are free. Important directories never become owned.
+function M.write_verdict(p, ctx, owned)
   if maki_own_target(p, ctx) then
     return { verdict = M.ASK, reason = M.R.maki_own }
   end
@@ -579,7 +618,13 @@ function M.write_verdict(p, ctx)
   if context_target(p) then
     return { verdict = M.ASK, reason = M.R.context }
   end
+  if important_target(p, ctx) then
+    return { verdict = M.ASK, reason = M.R.important }
+  end
   if path_outside(p, ctx.cwd, ctx.home) then
+    if owned and owned[M.owned_key(p, ctx)] then
+      return { verdict = M.ALLOW }
+    end
     return { verdict = M.ASK, reason = M.R.outside }
   end
   return { verdict = M.ALLOW }
@@ -602,5 +647,6 @@ M._unwrap = unwrap
 M._remote_spec = remote_spec
 M._credential_target = credential_target
 M._context_target = context_target
+M._important_target = important_target
 
 return M

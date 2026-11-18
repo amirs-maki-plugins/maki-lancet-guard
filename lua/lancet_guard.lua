@@ -174,12 +174,27 @@ end)
 -- File tools get rules-only verdicts: LANCET reads command lines, not
 -- paths. write and edit judge the target path; read and grep ask only for
 -- credential files, whose content would land in the transcript.
+--
+-- A first out-of-tree write asks; once the write actually ran, the path is
+-- owned for its session and later writes and edits to it are free. A
+-- denied write never runs, so it never owns anything. Files created by
+-- bash commands are not tracked.
+local owned = {}
+
+local function owned_set(ctx)
+  local sid = ctx.session_id or ""
+  if not owned[sid] then
+    owned[sid] = {}
+  end
+  return owned[sid]
+end
+
 local function gate_path(verdict_fn)
   return function(prev, input, ctx)
     if not enabled or type(input) ~= "table" or type(input.path) ~= "string" then
       return prev(input, ctx)
     end
-    local v = verdict_fn(input.path, rule_ctx)
+    local v = verdict_fn(input.path, rule_ctx, owned_set(ctx))
     if v.verdict == rules.ASK then
       counts.rule_asks = counts.rule_asks + 1
       return nil, { ask = ASK_PREFIX .. v.reason }
@@ -192,6 +207,16 @@ maki.api.set_slot("tool.write.input", gate_path(rules.write_verdict))
 maki.api.set_slot("tool.edit.input", gate_path(rules.write_verdict))
 maki.api.set_slot("tool.read.input", gate_path(rules.read_verdict))
 maki.api.set_slot("tool.grep.input", gate_path(rules.read_verdict))
+
+local function record_owned(prev, out, ctx)
+  if not out.is_error and type(ctx.input) == "table" and type(ctx.input.path) == "string" then
+    owned_set(ctx)[rules.owned_key(ctx.input.path, rule_ctx)] = true
+  end
+  return prev(out, ctx)
+end
+
+maki.api.set_slot("tool.write.output", record_owned)
+maki.api.set_slot("tool.edit.output", record_owned)
 
 local function status_line()
   local install = paths.ready()

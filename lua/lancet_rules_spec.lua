@@ -198,8 +198,8 @@ cases.path_helpers = function(check)
   check.is(rules._remote_spec("/a:b"), false)
 end
 
-local function w(p)
-  return rules.write_verdict(p, CTX)
+local function w(p, ctx, owned)
+  return rules.write_verdict(p, ctx or CTX, owned)
 end
 
 local function rd(p)
@@ -216,7 +216,6 @@ end
 
 cases.write_asks_by_target = function(check)
   check.is(w("~/Documents/x.txt").reason, rules.R.outside)
-  check.is(w("/etc/hosts").reason, rules.R.outside)
   check.is(w("../escape.txt").reason, rules.R.outside)
   check.is(w(".env").reason, rules.R.credential)
   check.is(w("~/.ssh/id_rsa").reason, rules.R.credential)
@@ -226,6 +225,23 @@ cases.write_asks_by_target = function(check)
   check.is(w(".maki/config.toml").reason, rules.R.context)
   check.is(w(CTX.config_dir .. "/init.lua").reason, rules.R.maki_own)
   check.is(w(CTX.state_base .. "/state.json").reason, rules.R.maki_own)
+end
+
+cases.important_directories_always_ask = function(check)
+  check.is(w("/etc/hosts").reason, rules.R.important)
+  check.is(w("~/.bashrc").reason, rules.R.important)
+  check.is(w("~/Library/Preferences/app.plist").reason, rules.R.important)
+  check.is(w("~/.config/app/config.toml").reason, rules.R.important)
+  local owned_set = { [rules.owned_key("~/.bashrc", CTX)] = true }
+  check.is(w("~/.bashrc", CTX, owned_set).reason, rules.R.important)
+end
+
+cases.first_out_of_tree_write_asks_then_owns = function(check)
+  check.eq(w("~/notes/scratch.md", CTX, {}).verdict, rules.ASK)
+  local owned_set = { [rules.owned_key("~/notes/scratch.md", CTX)] = true }
+  check.eq(w("~/notes/scratch.md", CTX, owned_set).verdict, rules.ALLOW)
+  check.eq(w("/Users/dev/notes/scratch.md", CTX, owned_set).verdict, rules.ALLOW)
+  check.eq(w("~/notes/other.md", CTX, owned_set).verdict, rules.ASK)
 end
 
 cases.credential_exemptions_apply_everywhere = function(check)
