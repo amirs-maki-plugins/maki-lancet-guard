@@ -101,7 +101,7 @@ local ALLOW_PROGRAMS = {
   go = true, rustc = true, uv = true, nix = true, tsc = true, pytest = true,
   eslint = true, prettier = true, ruff = true, black = true, rsync = true,
   touch = true, mkdir = true, cp = true, ln = true, chmod = true, chown = true,
-  install = true,
+  install = true, rm = true, mv = true, rmdir = true, tee = true, brew = true,
 }
 
 -- Local git work runs freely; push and reset --hard are caught above.
@@ -257,10 +257,22 @@ local function has_flag(args, flags)
   return false
 end
 
+-- curl and wget spell data flags with an = value, as in --post-data=x.
+local function has_data_flag(args)
+  for _, a in ipairs(args) do
+    for flag in pairs(NET_DATA_FLAGS) do
+      if a == flag or a:sub(1, #flag + 1) == flag .. "=" then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 local function has_risky_word(prog, args)
   for _, w in ipairs({ prog, table.unpack(args) }) do
     for token in tostring(w):gmatch("[%w_%-]+") do
-      if RISKY_WORDS[token:lower()] then
+      if RISKY_WORDS[token:gsub("^%-+", ""):lower()] then
         return true
       end
     end
@@ -388,7 +400,7 @@ local function judge_segment(segment, ctx)
       end
     end
   end
-  if (prog == "curl" or prog == "wget") and has_flag(args, NET_DATA_FLAGS) then
+  if (prog == "curl" or prog == "wget") and has_data_flag(args) then
     return { verdict = M.ASK, reason = M.R.net_send }
   end
 
