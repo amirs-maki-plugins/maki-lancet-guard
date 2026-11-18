@@ -177,6 +177,14 @@ if not wrote_state_files then
 end
 enabled = load_state()
 
+local function deny_message(reason)
+  local msg = DENY_PREFIX .. reason .. DENY_SUFFIX
+  if guidance ~= "" then
+    msg = msg .. "\n\n" .. guidance
+  end
+  return msg
+end
+
 maki.api.set_slot("tool.bash.input", function(prev, input, ctx)
   if not enabled or type(input) ~= "table" or type(input.command) ~= "string" then
     return prev(input, ctx)
@@ -184,7 +192,7 @@ maki.api.set_slot("tool.bash.input", function(prev, input, ctx)
   local v = rules.verdict(input.command, bash_ctx())
   if v.verdict == rules.DENY then
     counts.denied = counts.denied + 1
-    return nil, DENY_PREFIX .. v.reason .. guidance .. DENY_SUFFIX
+    return nil, deny_message(v.reason)
   end
   if v.verdict == rules.ASK then
     counts.rule_asks = counts.rule_asks + 1
@@ -300,7 +308,7 @@ maki.api.set_slot("tool.*.input", function(prev, input, ctx)
       local pat = mentions_protected(blob)
       if pat then
         counts.denied = counts.denied + 1
-        return nil, DENY_PREFIX .. string.format(PROTECTED_FMT, pat) .. guidance .. DENY_SUFFIX
+        return nil, deny_message(string.format(PROTECTED_FMT, pat))
       end
     end
   end

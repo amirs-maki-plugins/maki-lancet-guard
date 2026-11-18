@@ -1,4 +1,4 @@
-min_maki_version = "0.7.0"
+min_maki_version = "0.7.2"
 
 [permissions]
 # Every tool layer also needs session_read and session_write: it reads what
