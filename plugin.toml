@@ -1,10 +1,14 @@
 min_maki_version = "0.7.0"
 
 [permissions]
-# tool.bash.input charges what bash charges, and the daemon and setup run
-# processes; a package's grants are read strictly.
+# Every tool layer also needs session_read and session_write: it reads what
+# the model wrote and decides what runs and what it reads back. Without
+# them the layers are silently skipped.
+session_read = true
+session_write = true
+# tool.bash.input charges what bash charges, and the daemon runs processes.
 run = true
-# state dir, bundle and command lookup.
+# state dir, bundle and command lookup; read and grep layers.
 fs_read = true
-# bridge.py, state.json and the setup directory.
+# bridge.py, install.sh, state.json and the setup directory.
 fs_write = true
