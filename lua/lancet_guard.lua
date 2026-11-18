@@ -171,6 +171,28 @@ maki.api.set_slot("tool.bash.input", function(prev, input, ctx)
   return prev(input, ctx)
 end)
 
+-- File tools get rules-only verdicts: LANCET reads command lines, not
+-- paths. write and edit judge the target path; read and grep ask only for
+-- credential files, whose content would land in the transcript.
+local function gate_path(verdict_fn)
+  return function(prev, input, ctx)
+    if not enabled or type(input) ~= "table" or type(input.path) ~= "string" then
+      return prev(input, ctx)
+    end
+    local v = verdict_fn(input.path, rule_ctx)
+    if v.verdict == rules.ASK then
+      counts.rule_asks = counts.rule_asks + 1
+      return nil, { ask = ASK_PREFIX .. v.reason }
+    end
+    return prev(input, ctx)
+  end
+end
+
+maki.api.set_slot("tool.write.input", gate_path(rules.write_verdict))
+maki.api.set_slot("tool.edit.input", gate_path(rules.write_verdict))
+maki.api.set_slot("tool.read.input", gate_path(rules.read_verdict))
+maki.api.set_slot("tool.grep.input", gate_path(rules.read_verdict))
+
 local function status_line()
   local install = paths.ready()
     and "installed"

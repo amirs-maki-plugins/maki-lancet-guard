@@ -27,6 +27,7 @@ M.R = {
   system_change = "the command changes installed software or system services",
   maki_own = "the command touches maki's own configuration or this guard's state",
   beyond = "the command reaches beyond this project",
+  context = "the file changes what later sessions do",
 }
 
 -- rm -rf of these (the directory itself, or anything below them) is a hard
@@ -218,6 +219,60 @@ local function cred_basename_match(name)
   return false
 end
 
+-- Public keys, certificates, known_hosts and the .ssh/.aws config files are
+-- not secrets, even though they live next to ones.
+local function cred_exempt(p, home)
+  local name = basename(p) or ""
+  if name:match("%.pub$") or name:match("%.crt$") or name:match("%.cer$") then
+    return true
+  end
+  if name == "known_hosts" or name == "config" then
+    local np = normalize_path(p, home)
+    return under_dir(np, home .. "/.ssh") or under_dir(np, home .. "/.aws")
+  end
+  return false
+end
+
+-- The path itself is a credential, or sits in a credential directory.
+local function credential_target(p, home)
+  if cred_exempt(p, home) then
+    return false
+  end
+  local np = normalize_path(p, home)
+  for _, cred in ipairs(CRED_HOME_PATHS) do
+    if under_dir(np, home .. "/" .. cred) then
+      return true
+    end
+  end
+  for _, cred in ipairs(CRED_SYSTEM_PATHS) do
+    if np == cred then
+      return true
+    end
+  end
+  local name = basename(np)
+  return name ~= nil and cred_basename_match(name)
+end
+
+-- Instruction and project-config files that change what every later
+-- session does, in any directory.
+local CONTEXT_BASENAMES = {
+  ["AGENTS.md"] = true, ["AGENTS.local.md"] = true, ["CLAUDE.md"] = true,
+}
+
+local function context_target(p)
+  if CONTEXT_BASENAMES[basename(p) or ""] then
+    return true
+  end
+  return p == ".maki" or p:find("^%.maki/") ~= nil or p:find("/%.maki/") ~= nil
+    or p:find("/%.maki$") ~= nil
+end
+
+local function maki_own_target(p, ctx)
+  local np = normalize_path(p, ctx.home)
+  return (ctx.state_base and under_dir(np, ctx.state_base))
+    or (ctx.config_dir and under_dir(np, ctx.config_dir)) or false
+end
+
 -- A credential path appears as an argument. For cp, mv, install and rsync
 -- only the source arguments count: writing or copying over a credential
 -- file does not put its content in the transcript.
@@ -227,22 +282,9 @@ local function reads_credential(args, prog, home)
     last = last - 1
   end
   for i = 1, last do
-    local p = normalize_path(strip_quotes(args[i]), home)
-    if p:sub(1, 1) ~= "-" then
-      for _, cred in ipairs(CRED_HOME_PATHS) do
-        if under_dir(p, home .. "/" .. cred) then
-          return true
-        end
-      end
-      for _, cred in ipairs(CRED_SYSTEM_PATHS) do
-        if p == cred then
-          return true
-        end
-      end
-      local name = basename(p)
-      if name and cred_basename_match(name) then
-        return true
-      end
+    local p = strip_quotes(args[i])
+    if p:sub(1, 1) ~= "-" and credential_target(p, home) then
+      return true
     end
   end
   return false
@@ -524,10 +566,41 @@ function M.verdict(cmd, ctx)
   return worst or { verdict = M.ALLOW }
 end
 
+-- write_verdict(path, ctx) -> { verdict = "allow"|"ask", reason = string? }
+-- The target of a write or edit. Rules only: LANCET reads command lines,
+-- not file paths.
+function M.write_verdict(p, ctx)
+  if maki_own_target(p, ctx) then
+    return { verdict = M.ASK, reason = M.R.maki_own }
+  end
+  if credential_target(p, ctx.home) then
+    return { verdict = M.ASK, reason = M.R.credential }
+  end
+  if context_target(p) then
+    return { verdict = M.ASK, reason = M.R.context }
+  end
+  if path_outside(p, ctx.cwd, ctx.home) then
+    return { verdict = M.ASK, reason = M.R.outside }
+  end
+  return { verdict = M.ALLOW }
+end
+
+-- read_verdict(path, ctx) -> { verdict = "allow"|"ask", reason = string? }
+-- Reads go anywhere but to a credential file: the content would land in
+-- the transcript.
+function M.read_verdict(p, ctx)
+  if credential_target(p, ctx.home) then
+    return { verdict = M.ASK, reason = M.R.credential }
+  end
+  return { verdict = M.ALLOW }
+end
+
 -- Exported for the specs.
 M._path_outside = path_outside
 M._reads_credential = reads_credential
 M._unwrap = unwrap
 M._remote_spec = remote_spec
+M._credential_target = credential_target
+M._context_target = context_target
 
 return M

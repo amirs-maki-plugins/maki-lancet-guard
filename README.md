@@ -25,7 +25,7 @@ restart maki and accept the install prompt:
 
 ```lua
 maki.pack.add({
-  { src = "https://github.com/amirs-maki-plugins/maki-lancet-guard", version = "v1.1.0" },
+  { src = "https://github.com/amirs-maki-plugins/maki-lancet-guard", version = "v1.2.0" },
 })
 ```
 
@@ -79,6 +79,24 @@ Allowed without a prompt: read-only commands, builds, tests and linters,
 local git work, and file changes inside the working directory or `/tmp`.
 Everything else, like `kubectl delete` or a script with `deploy` in its
 name, goes to LANCET.
+
+## What the file rules do
+
+`write` and `edit` judge the target path, and `read` and `grep` ask only
+for credential files, whose content would land in the transcript. The
+verdicts are rules only: LANCET classifies shell command lines, and a
+synthesized command from a file path is a shape it never saw, scored
+against a threshold calibrated for real ones. The path is already
+structured, so lookups decide it.
+
+A write asks when its target sits outside the working directory (except
+`/tmp`), is or holds a credential (`.env`, `~/.ssh`, `*.pem`, ...),
+changes what later sessions do (`AGENTS.md`, `CLAUDE.md`, the project's
+`.maki/` config), or touches maki's own configuration or this guard's
+state. Public keys, certificates, `known_hosts`, `~/.ssh/config` and
+`.env.example` do not count as credentials. Everything else, including
+any file inside the project, passes through to maki's own permission
+flow.
 
 ## Configuration
 

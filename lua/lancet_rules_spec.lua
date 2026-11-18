@@ -198,4 +198,51 @@ cases.path_helpers = function(check)
   check.is(rules._remote_spec("/a:b"), false)
 end
 
+local function w(p)
+  return rules.write_verdict(p, CTX)
+end
+
+local function rd(p)
+  return rules.read_verdict(p, CTX)
+end
+
+cases.write_allows_routine_targets = function(check)
+  check.eq(w("src/main.rs").verdict, rules.ALLOW)
+  check.eq(w("/Users/dev/proj/notes.txt").verdict, rules.ALLOW)
+  check.eq(w("/tmp/out.txt").verdict, rules.ALLOW)
+  check.eq(w(".env.example").verdict, rules.ALLOW)
+  check.eq(w("keys/server.pub").verdict, rules.ALLOW)
+end
+
+cases.write_asks_by_target = function(check)
+  check.is(w("~/Documents/x.txt").reason, rules.R.outside)
+  check.is(w("/etc/hosts").reason, rules.R.outside)
+  check.is(w("../escape.txt").reason, rules.R.outside)
+  check.is(w(".env").reason, rules.R.credential)
+  check.is(w("~/.ssh/id_rsa").reason, rules.R.credential)
+  check.is(w("deploy.pem").reason, rules.R.credential)
+  check.is(w("AGENTS.md").reason, rules.R.context)
+  check.is(w("docs/CLAUDE.md").reason, rules.R.context)
+  check.is(w(".maki/config.toml").reason, rules.R.context)
+  check.is(w(CTX.config_dir .. "/init.lua").reason, rules.R.maki_own)
+  check.is(w(CTX.state_base .. "/state.json").reason, rules.R.maki_own)
+end
+
+cases.credential_exemptions_apply_everywhere = function(check)
+  check.eq(rd("~/.ssh/config").verdict, rules.ALLOW)
+  check.eq(rd("~/.ssh/known_hosts").verdict, rules.ALLOW)
+  check.eq(v("cat ~/.ssh/config").verdict, rules.ALLOW)
+  check.eq(v("cat ~/.ssh/id_ed25519.pub").verdict, rules.ALLOW)
+  check.is(w("~/.ssh/config").reason, rules.R.outside)
+end
+
+cases.read_asks_only_for_credentials = function(check)
+  check.is(rd(".env").reason, rules.R.credential)
+  check.is(rd("/etc/shadow").reason, rules.R.credential)
+  check.eq(rd("src/main.rs").verdict, rules.ALLOW)
+  check.eq(rd("/etc/hosts").verdict, rules.ALLOW)
+  check.eq(rd(CTX.config_dir .. "/init.lua").verdict, rules.ALLOW)
+  check.eq(rd("/tmp/whatever").verdict, rules.ALLOW)
+end
+
 return { name = "lancet_rules", cases = cases }
