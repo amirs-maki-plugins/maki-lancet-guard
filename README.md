@@ -25,23 +25,26 @@ restart maki and accept the install prompt:
 
 ```lua
 maki.pack.add({
-  { src = "https://github.com/amirs-maki-plugins/maki-lancet-guard", version = "v1.0.1" },
+  { src = "https://github.com/amirs-maki-plugins/maki-lancet-guard", version = "v1.1.0" },
 })
 ```
 
-Requires maki 0.7.0 or newer, `curl`, `unzip` and [uv](https://docs.astral.sh/uv/)
-on your PATH. Update with `/packupdate maki-lancet-guard`.
+Requires maki 0.7.0 or newer. Update with `/packupdate maki-lancet-guard`.
 
-Then download the model once:
+The model is yours to install, in your own terminal, so the download and
+its progress happen where you can see them:
 
+```sh
+sh ~/.local/state/maki/lancet-guard/install.sh
 ```
-/lancet-guard setup
-```
 
-This fetches the LANCET Nano v0.4.3 release from GitHub, verifies it
-against the release's SHA-256 checksums, and builds a uv venv under
-`~/.local/state/maki/lancet-guard/`. The bridge daemon that serves the
-model is written there too.
+The plugin writes that script on load. It downloads the LANCET Nano
+v0.4.3 release from GitHub, verifies it against the release's SHA-256
+checksums, unpacks the bundle and builds a uv venv, all inside
+`~/.local/state/maki/lancet-guard/`. It needs `curl`, `unzip` and
+[uv](https://docs.astral.sh/uv/) on your PATH. `/lancet-guard` reports
+whether the install is complete, and every prompt the guard raises
+before that says the same `sh` line.
 
 ## Use
 

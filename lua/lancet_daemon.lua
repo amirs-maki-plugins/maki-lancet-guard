@@ -10,7 +10,7 @@ local POLL_MS = 100
 local PROBE_TIMEOUT_SECS = 2
 local START_SCRIPT_FMT = "nohup '%s' '%s' --socket '%s' --classify '%s' --model '%s' >> '%s' 2>&1 &"
 
-M.NOT_INSTALLED_ERR = "lancet is not installed; run /lancet-guard setup"
+M.NOT_INSTALLED_FMT = "lancet is not installed; run sh %s in your terminal"
 M.START_ERR_FMT = "the lancet daemon did not start (see %s)"
 
 local function socket_alive(path)
@@ -23,14 +23,14 @@ local function socket_alive(path)
 end
 
 -- ensure(paths, start_timeout_ms) -> true? , string?
--- paths = { socket, python, bridge, classify, model, log, ready() }
+-- paths = { socket, python, bridge, classify, model, log, install, ready() }
 -- Yields while polling for the socket to answer.
 function M.ensure(paths, start_timeout_ms)
   if socket_alive(paths.socket) then
     return true
   end
   if not paths.ready() then
-    return nil, M.NOT_INSTALLED_ERR
+    return nil, string.format(M.NOT_INSTALLED_FMT, paths.install)
   end
   local script = string.format(
     START_SCRIPT_FMT,
