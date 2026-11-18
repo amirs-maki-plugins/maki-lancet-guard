@@ -27,9 +27,19 @@ local ASK_PREFIX = "lancet-guard: "
 local SCORE_ASK_FMT = "LANCET scored this command's risk at %.2f."
 local UNSCORED_FMT = "lancet-guard could not score this command (%s)."
 local LONG_COMMAND_ASK = "lancet-guard: the command is too long for the classifier."
+local PROTECTED_FMT = "the call touches a protected path (%s)."
 
 -- LANCET reads at most this many bytes; past it the answer is always review.
 local MAX_COMMAND_BYTES = 8192
+
+local function normalize_tilde(p, home)
+  if p:sub(1, 2) == "~/" then
+    return home .. p:sub(2)
+  elseif p == "~" then
+    return home
+  end
+  return p
+end
 
 -- Written to the state dir on load, run by the user in their own terminal.
 local INSTALL_SH_FMT = [==[
@@ -85,6 +95,49 @@ local rule_ctx = {
   config_dir = maki.env.config_dir(),
 }
 
+-- Extra deny rules from a private config file next to the maki config,
+-- never part of the plugin: protected paths, pinned environment variables,
+-- denied flags and denied phrases. A missing file adds nothing.
+local extra, guidance = {}, ""
+do
+  local text = rule_ctx.config_dir and maki.fs.read(rule_ctx.config_dir .. "/lancet-guard.yaml")
+  if text then
+    local decoded, yerr = maki.yaml.decode(text)
+    if type(decoded) ~= "table" then
+      maki.log.warn("lancet_guard: could not parse " .. rule_ctx.config_dir .. "/lancet-guard.yaml: " .. tostring(yerr))
+    else
+      extra = decoded
+      if type(decoded.pinned_env) == "table" then
+        for _, pin in pairs(decoded.pinned_env) do
+          if type(pin) == "table" and type(pin.value) == "string" then
+            pin.value = normalize_tilde(pin.value, rule_ctx.home)
+          end
+        end
+      end
+      if type(decoded.guidance) == "string" then
+        guidance = decoded.guidance
+      end
+    end
+  end
+end
+
+local function bash_ctx()
+  local env_values = {}
+  if type(extra.pinned_env) == "table" then
+    for var in pairs(extra.pinned_env) do
+      env_values[var] = maki.uv.os_getenv(var)
+    end
+  end
+  return {
+    cwd = rule_ctx.cwd,
+    home = rule_ctx.home,
+    state_base = rule_ctx.state_base,
+    config_dir = rule_ctx.config_dir,
+    extra = extra,
+    env_values = env_values,
+  }
+end
+
 local enabled
 local counts = {
   denied = 0, rule_asks = 0, allowed = 0, classified = 0,
@@ -128,10 +181,10 @@ maki.api.set_slot("tool.bash.input", function(prev, input, ctx)
   if not enabled or type(input) ~= "table" or type(input.command) ~= "string" then
     return prev(input, ctx)
   end
-  local v = rules.verdict(input.command, rule_ctx)
+  local v = rules.verdict(input.command, bash_ctx())
   if v.verdict == rules.DENY then
     counts.denied = counts.denied + 1
-    return nil, DENY_PREFIX .. v.reason .. DENY_SUFFIX
+    return nil, DENY_PREFIX .. v.reason .. guidance .. DENY_SUFFIX
   end
   if v.verdict == rules.ASK then
     counts.rule_asks = counts.rule_asks + 1
@@ -217,6 +270,42 @@ end
 
 maki.api.set_slot("tool.write.output", record_owned)
 maki.api.set_slot("tool.edit.output", record_owned)
+
+-- A protected path from the private config denies any tool call whose
+-- input mentions it, whatever the tool is. The pattern is matched both
+-- raw and with JSON-escaped slashes. Three calls are exempt: edits to the
+-- rule file itself (its content names the paths), and the batch and task
+-- wrappers, whose sub-calls and prompts are checked one by one as their
+-- own calls.
+local BLOB_EXEMPT_TOOLS = { batch = true, task = true }
+
+local function mentions_protected(blob)
+  for _, pat in ipairs(type(extra.protected_paths) == "table" and extra.protected_paths or {}) do
+    if type(pat) == "string" and pat ~= "" then
+      if blob:find(pat, 1, true) or blob:find(pat:gsub("/", "\\/"), 1, true) then
+        return pat
+      end
+    end
+  end
+  return nil
+end
+
+maki.api.set_slot("tool.*.input", function(prev, input, ctx)
+  if enabled and type(extra.protected_paths) == "table" and not BLOB_EXEMPT_TOOLS[ctx.tool] then
+    local is_rule_file = type(input) == "table"
+      and rule_ctx.config_dir
+      and input.path == rule_ctx.config_dir .. "/lancet-guard.yaml"
+    if not is_rule_file then
+      local blob = maki.json.encode(input) or ""
+      local pat = mentions_protected(blob)
+      if pat then
+        counts.denied = counts.denied + 1
+        return nil, DENY_PREFIX .. string.format(PROTECTED_FMT, pat) .. guidance .. DENY_SUFFIX
+      end
+    end
+  end
+  return prev(input, ctx)
+end)
 
 local function status_line()
   local install = paths.ready()

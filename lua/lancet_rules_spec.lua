@@ -261,4 +261,43 @@ cases.read_asks_only_for_credentials = function(check)
   check.eq(rd("/tmp/whatever").verdict, rules.ALLOW)
 end
 
+-- Fixtures for the private-config rules: generic shapes, no real values.
+local EXTRA = {
+  deny_substrings = { "login to the server" },
+  deny_flags = { "--secret-flag" },
+  pinned_env = {
+    MY_VAR = { value = "/Users/dev/.config/expected", programs = { "myprog" } },
+  },
+}
+
+local function xv(cmd, env_values)
+  local ctx = {
+    cwd = CTX.cwd, home = CTX.home, state_base = CTX.state_base,
+    config_dir = CTX.config_dir, extra = EXTRA,
+    env_values = env_values or { MY_VAR = "/Users/dev/.config/expected" },
+  }
+  return rules.verdict(cmd, ctx)
+end
+
+cases.extra_rules_deny = function(check)
+  check.eq(xv("myprog do things", { MY_VAR = "/wrong" }).verdict, rules.DENY)
+  check.has(xv("myprog do things", { MY_VAR = "/wrong" }).reason, "was not started with MY_VAR")
+  check.eq(xv("login to the server").verdict, rules.DENY)
+  check.eq(xv("myprog run --secret-flag").verdict, rules.DENY)
+  check.has(xv("myprog run --secret-flag").reason, "--secret-flag")
+  check.eq(xv("MY_VAR=/other myprog run").verdict, rules.DENY)
+  check.eq(xv("env MY_VAR=/other myprog run").verdict, rules.DENY)
+  check.eq(xv("export MY_VAR=/other").verdict, rules.DENY)
+end
+
+cases.extra_rules_deny_only_when_matched = function(check)
+  check.eq(xv("myprog run", { MY_VAR = "/Users/dev/.config/expected" }).verdict, rules.CLASSIFY)
+  check.eq(xv("echo MY_VAR=/other thing").verdict, rules.ALLOW)
+  check.eq(xv("grep MY_VAR= file.txt").verdict, rules.ALLOW)
+  check.eq(xv("myprog run --secret-flag-url").verdict, rules.CLASSIFY)
+  check.eq(xv("cargo build").verdict, rules.ALLOW)
+  check.is(rules._assigns_var("env MY_VAR=x myprog", "MY_VAR"), true)
+  check.is(rules._assigns_var("echo MY_VAR=x", "MY_VAR"), false)
+end
+
 return { name = "lancet_rules", cases = cases }

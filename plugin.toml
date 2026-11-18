@@ -6,6 +6,11 @@ min_maki_version = "0.7.0"
 # them the layers are silently skipped.
 session_read = true
 session_write = true
+# The protected-path layer wraps tool.*.input, so it must pay whatever any
+# tool charges, including tools that declare nothing.
+env = true
+net = true
+session_settings = true
 # tool.bash.input charges what bash charges, and the daemon runs processes.
 run = true
 # state dir, bundle and command lookup; read and grep layers.

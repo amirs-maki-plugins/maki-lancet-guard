@@ -405,6 +405,86 @@ local function remote_spec(a)
   return slash == nil or slash > colon
 end
 
+-- Extra rules from the user's private config file. They are denies, so no
+-- model and no later rule can let them through.
+--
+-- ctx.extra = {
+--   deny_substrings = { "phrase", ... },
+--   deny_flags = { "--flag", ... },
+--   pinned_env = { VAR = { value = "expanded expected value", programs = { "prog" } } },
+-- }
+-- ctx.env_values = { VAR = current value from the environment }
+
+local ASSIGNERS = {
+  env = true, export = true, declare = true, typeset = true,
+  ["local"] = true, readonly = true,
+}
+
+-- A pinned variable is assigned inline: a leading VAR=val of a command, or
+-- an argument of env/export/declare/... Text inside echo or grep arguments
+-- is fine, because those never set anything.
+local function assigns_var(segment, var)
+  for part in (segment .. "\n"):gmatch("([^(){}%c]*)") do
+    local first_cmd = nil
+    for wordtok in part:gmatch("%S+") do
+      local word = wordtok:gsub("^[\"']", "")
+      local prefix = var .. "="
+      if first_cmd == nil then
+        if word:sub(1, #prefix) == prefix then
+          return true
+        elseif not word:match("^[%a_][%w_]*=") then
+          first_cmd = word
+          if not ASSIGNERS[word] then
+            break
+          end
+        end
+      elseif word:sub(1, #prefix) == prefix then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+local function extra_denial(segment, prog, args, ctx)
+  local extra = ctx.extra
+  if not extra then
+    return nil
+  end
+  if extra.pinned_env then
+    for var, pin in pairs(extra.pinned_env) do
+      if type(pin) == "table" and type(pin.value) == "string" then
+        if assigns_var(segment, var) then
+          return "the command sets " .. var .. " inline"
+        end
+        for _, p in ipairs(pin.programs or {}) do
+          if p == prog and ctx.env_values and ctx.env_values[var] ~= pin.value then
+            return "maki was not started with " .. var .. "=" .. pin.value
+          end
+        end
+      end
+    end
+  end
+  if extra.deny_flags then
+    for _, flag in ipairs(extra.deny_flags) do
+      for _, a in ipairs(args) do
+        if a == flag or a:sub(1, #flag + 1) == flag .. "=" then
+          return "the command passes " .. flag
+        end
+      end
+    end
+  end
+  if extra.deny_substrings then
+    local lower = segment:lower()
+    for _, pat in ipairs(extra.deny_substrings) do
+      if lower:find(tostring(pat):lower(), 1, true) then
+        return "the command matches a denied pattern"
+      end
+    end
+  end
+  return nil
+end
+
 local function judge_segment(segment, ctx)
   local first, w, saw_root = unwrap(segment)
   if not first then
@@ -414,6 +494,11 @@ local function judge_segment(segment, ctx)
   local args = {}
   for i = 2, #w do
     args[#args + 1] = w[i]
+  end
+
+  local extra_why = extra_denial(segment, prog, args, ctx)
+  if extra_why then
+    return { verdict = M.DENY, reason = extra_why }
   end
 
   if prog:match("^mkfs") then
@@ -648,5 +733,6 @@ M._remote_spec = remote_spec
 M._credential_target = credential_target
 M._context_target = context_target
 M._important_target = important_target
+M._assigns_var = assigns_var
 
 return M

@@ -25,7 +25,7 @@ restart maki and accept the install prompt:
 
 ```lua
 maki.pack.add({
-  { src = "https://github.com/amirs-maki-plugins/maki-lancet-guard", version = "v1.3.1" },
+  { src = "https://github.com/amirs-maki-plugins/maki-lancet-guard", version = "v1.4.0" },
 })
 ```
 
@@ -103,6 +103,38 @@ free: a denied write never runs, so it never owns anything. Files
 created by bash commands are not tracked. Everything else, including
 any file inside the project, passes through to maki's own permission
 flow.
+
+## Extra deny rules, privately
+
+A yaml file next to your maki config adds deny rules without touching the
+plugin, so the rules that describe your own environment never leave your
+machine: `~/.config/maki/lancet-guard.yaml`. It is read at startup and on
+`/reload`; a missing file adds nothing.
+
+```yaml
+protected_paths:
+  - a/path/no/tool/may/mention
+pinned_env:
+  SOME_VAR:
+    value: the value it must hold
+    programs: [prog1, prog2]
+deny_flags:
+  - --a-flag
+deny_substrings:
+  - a phrase
+guidance: |
+  Text appended to every deny from these rules.
+```
+
+`protected_paths` denies any tool call whose input mentions the path,
+except edits to the rule file itself and the batch and task wrappers,
+whose sub-calls are checked one by one. `pinned_env` denies an inline
+assignment of the variable (`VAR=x cmd` and `env VAR=x cmd`) and denies
+running the listed programs unless the variable holds the value.
+`deny_flags` denies passing the flag, with or without an `= value`.
+`deny_substrings` denies commands containing the phrase,
+case-insensitively. All of them are denies: no model and no later rule
+can let the call through.
 
 ## Configuration
 
