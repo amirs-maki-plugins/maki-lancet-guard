@@ -25,7 +25,7 @@ restart maki and accept the install prompt:
 
 ```lua
 maki.pack.add({
-  { src = "https://github.com/amirs-maki-plugins/maki-lancet-guard", version = "v1.0.0" },
+  { src = "https://github.com/amirs-maki-plugins/maki-lancet-guard", version = "v1.0.1" },
 })
 ```
 

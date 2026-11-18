@@ -14,7 +14,12 @@ local bridge_src = require("lancet_bridge_src")
 local LANCET_VERSION = "v0.4.3"
 local BUNDLE_DIRNAME = "lancet-" .. LANCET_VERSION .. "-nano-cpu-int8"
 local RELEASE_BASE = "https://github.com/TannerMidd/LANCET-model/releases/download"
-local DOWNLOAD_TIMEOUT_MS = 600000
+local DOWNLOAD_URL = RELEASE_BASE .. "/" .. LANCET_VERSION .. "/" .. BUNDLE_DIRNAME .. ".zip"
+local SUMS_URL = RELEASE_BASE .. "/" .. LANCET_VERSION .. "/SHA256SUMS.txt"
+-- The release asset's exact size, for the progress flash.
+local ZIP_BYTES = 108521974
+local MAX_DOWNLOAD_SECS = 1800
+local POLL_MS = 1000
 local INSTALL_TIMEOUT_MS = 300000
 local STEP_TIMEOUT_MS = 30000
 
@@ -171,8 +176,48 @@ local function run_step(argv, step_opts)
   return true
 end
 
-local function setup()
-  maki.ui.flash("lancet-guard: downloading " .. LANCET_VERSION)
+local setup_running = false
+local SETUP_RUNNING_ERR = "setup is already running"
+
+-- The model download runs with an on_exit flag and a size-polling loop, so
+-- the flash shows progress and a slow network is not cut off by a wait
+-- timeout.
+local function run_download()
+  local finished, exit_code = false, nil
+  local id, err = maki.fn.jobstart({ "curl", "-fL", "-o", paths.zip, DOWNLOAD_URL }, {
+    scope = "task",
+    stdout = false,
+    stderr = false,
+    on_exit = function(_, code)
+      finished, exit_code = true, code
+    end,
+  })
+  if not id then
+    return nil, err
+  end
+  for _ = 1, MAX_DOWNLOAD_SECS do
+    if finished then
+      break
+    end
+    maki.async.sleep(POLL_MS)
+    local meta = maki.fs.metadata(paths.zip)
+    maki.ui.flash(string.format(
+      "lancet-guard: downloading the model, %.0f of %.0f MB",
+      (meta and meta.size or 0) / 1048576,
+      ZIP_BYTES / 1048576
+    ))
+  end
+  if not finished then
+    maki.fn.jobstop(id)
+    return nil, "the download did not finish in " .. MAX_DOWNLOAD_SECS .. " seconds"
+  end
+  if exit_code ~= 0 then
+    return nil, "curl exited with code " .. tostring(exit_code)
+  end
+  return true
+end
+
+local function setup_inner()
   local ok, err = maki.fs.mkdir(base, { parents = true })
   if not ok then
     return nil, err
@@ -181,10 +226,12 @@ local function setup()
   if not wok then
     return nil, werr
   end
+  local ok2, err2 = run_download()
+  if not ok2 then
+    return nil, "could not download the model: " .. err2
+  end
   local steps = {
-    { { "curl", "-fL", "-o", paths.zip, RELEASE_BASE .. "/" .. LANCET_VERSION .. "/" .. BUNDLE_DIRNAME .. ".zip" },
-      "download the model", DOWNLOAD_TIMEOUT_MS },
-    { { "curl", "-fL", "-o", paths.sums, RELEASE_BASE .. "/" .. LANCET_VERSION .. "/SHA256SUMS.txt" },
+    { { "curl", "-fL", "-o", paths.sums, SUMS_URL },
       "download the checksums", STEP_TIMEOUT_MS },
     { "shasum -a 256 -c SHA256SUMS.txt || sha256sum -c SHA256SUMS.txt",
       "verify the checksums", STEP_TIMEOUT_MS, base },
@@ -196,9 +243,9 @@ local function setup()
   for _, step in ipairs(steps) do
     local argv, what, timeout_ms, cwd = step[1], step[2], step[3], step[4]
     maki.ui.flash("lancet-guard: " .. what)
-    local ok2, err2 = run_step(argv, { timeout_ms = timeout_ms, cwd = cwd })
-    if not ok2 then
-      return nil, "could not " .. what .. ": " .. err2
+    local ok3, err3 = run_step(argv, { timeout_ms = timeout_ms, cwd = cwd })
+    if not ok3 then
+      return nil, "could not " .. what .. ": " .. err3
     end
   end
   maki.fs.rm(paths.zip, { force = true })
@@ -206,6 +253,16 @@ local function setup()
     return nil, "the install finished but the bundle looks incomplete"
   end
   return true
+end
+
+local function setup()
+  if setup_running then
+    return nil, SETUP_RUNNING_ERR
+  end
+  setup_running = true
+  local ok, err = setup_inner()
+  setup_running = false
+  return ok, err
 end
 
 local function status_line()
@@ -236,7 +293,7 @@ maki.api.register_command({
         if ok then
           maki.ui.flash("lancet-guard: " .. LANCET_VERSION .. " installed")
         else
-          maki.ui.flash("lancet-guard setup failed (see maki.log)")
+          maki.ui.flash("lancet-guard setup failed: " .. tostring(err):sub(1, 140))
           maki.log.error("lancet_guard setup: " .. tostring(err))
         end
       end)
